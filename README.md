@@ -2,7 +2,7 @@
 
 <img src="docs/icon.png" alt="Brightern icon" width="128">
 
-Makes the Tern Setups OLED monitor follow the MacBook's brightness.
+Makes the Tern Setups OLED monitor follow the MacBook's brightness without changing look of the macOS brightness UI.
 
 Use the brightness keys, the Control Center slider or auto-brightness exactly as before. macOS shows its own brightness indicator and adjusts the MacBook screen, and Brightern copies that level to the monitor over DDC/CI (the standard monitor-control channel over USB-C). Brightern has no brightness UI of its own: just a small sun icon in the menu bar, and a settings window when you open the app.
 
