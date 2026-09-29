@@ -11,6 +11,7 @@ final class SyncEngine {
     private(set) var monitorConnected = false
     private(set) var isPaused: Bool
     private(set) var opensAtLogin: Bool
+    private(set) var showsMenuBarIcon: Bool
     private(set) var curve: BrightnessCurve
     private(set) var isCalibrating = false
     /// The monitor level picked with the calibration slider.
@@ -24,11 +25,13 @@ final class SyncEngine {
     /// For the C callbacks, which can't capture context.
     private static weak var instance: SyncEngine?
     private static let pausedKey = "paused"
+    private static let hidesMenuBarIconKey = "hidesMenuBarIcon"
 
     init() {
         curve = BrightnessCurve.load()
         isPaused = UserDefaults.standard.bool(forKey: Self.pausedKey)
         opensAtLogin = SMAppService.mainApp.status == .enabled
+        showsMenuBarIcon = !UserDefaults.standard.bool(forKey: Self.hidesMenuBarIconKey)
         guard isSupported else { return }
 
         Self.instance = self
@@ -56,6 +59,11 @@ final class SyncEngine {
         isPaused = paused
         UserDefaults.standard.set(paused, forKey: Self.pausedKey)
         if let target { link.send(target, force: true) }
+    }
+
+    func setShowsMenuBarIcon(_ shows: Bool) {
+        showsMenuBarIcon = shows
+        UserDefaults.standard.set(!shows, forKey: Self.hidesMenuBarIconKey)
     }
 
     func setOpensAtLogin(_ enabled: Bool) {
