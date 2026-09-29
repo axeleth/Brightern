@@ -1,0 +1,15 @@
+# Build output
+.build/
+build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Local secrets (none are needed today; this keeps any future ones out of git)
+.env
+.env.*
+!.env.example
