@@ -1,27 +1,27 @@
 import Foundation
 import IOKit
 
-/// The Tern Setups OLED monitor, controlled over DDC/CI.
-/// Only this monitor is ever sent commands; any other external display is left alone.
+/// An external monitor controlled over DDC/CI: the first connected one that answers a brightness read.
+/// Displays that don't speak DDC/CI (such as Apple's own, which macOS controls itself) are left alone.
 /// Not thread-safe: use each instance from one queue.
-final class TernMonitor {
-    /// EDID IDs the monitor reports (manufacturer "RTK", product name "M series Mac").
-    static let vendorID = 19083
-    static let productID = 159
+final class ExternalMonitor {
+    /// The product name from the monitor's EDID, e.g. "LG ULTRAGEAR+".
+    let name: String
 
     private static let brightnessCode: UInt8 = 0x10
 
     private let service: CFTypeRef
-    /// Raw DDC value that means 100%. The monitor reports it; it's 100 on this model.
+    /// Raw DDC value that means 100%, as the monitor reports it (usually 100).
     private var maxValue = 100
 
-    private init(service: CFTypeRef) {
+    private init(service: CFTypeRef, name: String) {
         self.service = service
+        self.name = name
     }
 
     /// Walks the I/O Registry in order. Each external `DCPAVServiceProxy` (the DDC channel)
     /// comes after the `IOMobileFramebufferShim` that describes the display attached to it.
-    static func find() -> TernMonitor? {
+    static func find() -> ExternalMonitor? {
         guard let create = PrivateAPI.avServiceCreate else { return nil }
         var iterator: io_iterator_t = 0
         let root = IORegistryGetRootEntry(kIOMainPortDefault)
@@ -30,19 +30,19 @@ final class TernMonitor {
         else { return nil }
         defer { IOObjectRelease(iterator) }
 
-        var previousDisplayIsTern = false
+        var previousDisplayName: String?
         while case let entry = IOIteratorNext(iterator), entry != 0 {
             defer { IOObjectRelease(entry) }
             if IOObjectConformsTo(entry, "IOMobileFramebufferShim") != 0 {
-                previousDisplayIsTern = isTern(entry)
-            } else if IOObjectConformsTo(entry, "DCPAVServiceProxy") != 0, previousDisplayIsTern,
+                previousDisplayName = name(of: entry)
+            } else if IOObjectConformsTo(entry, "DCPAVServiceProxy") != 0, let name = previousDisplayName,
                 property(entry, "Location") as? String == "External",
                 let service = create(kCFAllocatorDefault, entry)?.takeRetainedValue()
             {
-                let monitor = TernMonitor(service: service)
-                if let reading = monitor.read(brightnessCode), reading.max > 0 {
-                    monitor.maxValue = reading.max
-                }
+                let monitor = ExternalMonitor(service: service, name: name)
+                // Only a monitor that answers speaks DDC/CI; otherwise try the next display.
+                guard let reading = monitor.read(brightnessCode), reading.max > 0 else { continue }
+                monitor.maxValue = reading.max
                 return monitor
             }
         }
@@ -108,11 +108,12 @@ final class TernMonitor {
         bytes.reduce(seed, ^)
     }
 
-    private static func isTern(_ framebuffer: io_registry_entry_t) -> Bool {
+    /// Nil if the framebuffer has no display attached.
+    private static func name(of framebuffer: io_registry_entry_t) -> String? {
         guard let attributes = property(framebuffer, "DisplayAttributes") as? [String: Any],
             let product = attributes["ProductAttributes"] as? [String: Any]
-        else { return false }
-        return product["LegacyManufacturerID"] as? Int == vendorID && product["ProductID"] as? Int == productID
+        else { return nil }
+        return product["ProductName"] as? String ?? "External monitor"
     }
 
     private static func property(_ entry: io_registry_entry_t, _ key: String) -> Any? {

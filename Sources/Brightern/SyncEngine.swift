@@ -2,13 +2,18 @@ import AppKit
 import Observation
 import ServiceManagement
 
-/// Copies the MacBook's brightness to the Tern monitor whenever macOS changes it:
-/// brightness keys, the Control Center slider, or auto-brightness. Main thread only.
+/// Sets the external monitor's brightness. With the lid open it copies the MacBook's brightness whenever
+/// macOS changes it: brightness keys, the Control Center slider, or auto-brightness. With the lid closed
+/// there's nothing to copy, so the brightness keys set the monitor directly. Main thread only.
 @Observable
 final class SyncEngine {
     private(set) var laptopLevel: Double?
     private(set) var monitorLevel: Int?
     private(set) var monitorConnected = false
+    /// The monitor last found. Kept after it's unplugged, so settings can still name it.
+    private(set) var monitorName: String?
+    /// No built-in screen is online, so the brightness keys have nothing else to control.
+    private(set) var lidClosed = false
     private(set) var isPaused: Bool
     private(set) var opensAtLogin: Bool
     private(set) var showsMenuBarIcon: Bool
@@ -19,6 +24,7 @@ final class SyncEngine {
     let isSupported = PrivateAPI.isAvailable
 
     @ObservationIgnored private let link = MonitorLink()
+    @ObservationIgnored private let keys = BrightnessKeys()
     @ObservationIgnored private var observedDisplays = Set<CGDirectDisplayID>()
     @ObservationIgnored private var pendingResync: DispatchWorkItem?
 
@@ -40,25 +46,35 @@ final class SyncEngine {
                 guard let self else { return }
                 monitorConnected = level != nil
                 if let level { monitorLevel = level }
+                updateKeys()
             }
         }
+        keys.onStep = { [weak self] up, fine in self?.brightnessKeyPressed(up: up, fine: fine) }
         registerForSystemEvents()
         resync()
     }
 
     var statusText: String {
         guard isSupported else { return "Not available on this version of macOS" }
-        guard monitorConnected else { return "Tern monitor not connected" }
+        guard monitorConnected else { return "Monitor not connected" }
         let monitor = monitorLevel.map { "\($0)%" } ?? "…"
-        guard let laptopLevel else { return "Lid closed · Monitor \(monitor)" }
         if isPaused { return "Paused · Monitor \(monitor)" }
+        if lidClosed { return "Brightness keys → Monitor \(monitor)" }
+        guard let laptopLevel else { return "Monitor \(monitor)" }
         return "MacBook \(Int((laptopLevel * 100).rounded()))% → Monitor \(monitor)"
+    }
+
+    /// Whether the brightness keys set the monitor. Only with the lid closed, so they never take over
+    /// from the MacBook's screen, and only when there's a monitor for them to set.
+    var keysControlMonitor: Bool {
+        isSupported && !isPaused && lidClosed && monitorConnected
     }
 
     func setPaused(_ paused: Bool) {
         isPaused = paused
         UserDefaults.standard.set(paused, forKey: Self.pausedKey)
         if let target { link.send(target, force: true) }
+        updateKeys()
     }
 
     func setShowsMenuBarIcon(_ shows: Bool) {
@@ -129,6 +145,23 @@ final class SyncEngine {
         if let target { link.send(target) }
     }
 
+    // MARK: Brightness keys (lid closed)
+
+    private func updateKeys() {
+        keys.isEnabled = keysControlMonitor
+    }
+
+    /// Steps the monitor like macOS steps the MacBook's screen: 16 steps, or 64 with Option-Shift.
+    /// There's no on-screen indicator: macOS 26's own one only shows levels of screens macOS controls,
+    /// so for this monitor its bar would always be empty.
+    private func brightnessKeyPressed(up: Bool, fine: Bool) {
+        guard keysControlMonitor, let current = monitorLevel else { return }
+        let level = BrightnessKeys.step(from: current, up: up, steps: fine ? 64 : 16)
+        monitorLevel = level  // right away, so quick presses add up before the monitor confirms each one
+        if isCalibrating { calibrationLevel = level }
+        link.send(level)
+    }
+
     private func observeBuiltInDisplay() {
         guard let display = BuiltInDisplay.id, !observedDisplays.contains(display),
             let register = PrivateAPI.registerForBrightnessChanges
@@ -149,12 +182,20 @@ final class SyncEngine {
     private func registerForSystemEvents() {
         CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
             guard !flags.contains(.beginConfigurationFlag) else { return }
-            DispatchQueue.main.async { SyncEngine.instance?.scheduleResync() }
+            DispatchQueue.main.async { SyncEngine.instance?.displaysChanged() }
         }, nil)
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.scheduleResync() }
         }
+    }
+
+    /// A display was added, removed or reconfigured, e.g. the lid opened or closed. When the lid opens,
+    /// the brightness keys go back to macOS straight away; the rest waits for the displays to settle.
+    private func displaysChanged() {
+        lidClosed = BuiltInDisplay.id == nil
+        updateKeys()
+        scheduleResync()
     }
 
     /// Displays need a moment after waking, opening the lid or being plugged in, so wait before talking to them.
@@ -167,13 +208,18 @@ final class SyncEngine {
 
     private func resync(attempt: Int = 1) {
         observeBuiltInDisplay()
-        laptopLevel = BuiltInDisplay.id.flatMap(BuiltInDisplay.brightness)
+        let builtIn = BuiltInDisplay.id
+        lidClosed = builtIn == nil
+        updateKeys()
+        laptopLevel = builtIn.flatMap(BuiltInDisplay.brightness)
         let target = target
-        link.reconnect(applying: target) { [weak self] connected, reported in
+        link.reconnect(applying: target) { [weak self] found, reported in
             guard let self else { return }
-            monitorConnected = connected
+            monitorConnected = found != nil
+            if let found { monitorName = found }
             if let reported { monitorLevel = reported }
-            let settled = connected && reported != nil && (target == nil || abs(reported! - target!) <= 1)
+            updateKeys()
+            let settled = found != nil && reported != nil && (target == nil || abs(reported! - target!) <= 1)
             if !settled && attempt < 5 { scheduleResync(after: 1.5, attempt: attempt + 1) }
         }
     }

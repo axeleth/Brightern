@@ -31,6 +31,27 @@ expect(curve.monitorLevel(forLaptop: 0) == 10, "a point at 0% replaces the fixed
 let levels = stride(from: 0.0, through: 1.0, by: 0.01).map(curve.monitorLevel(forLaptop:))
 expect(zip(levels, levels.dropFirst()).allSatisfy { $0 <= $1 }, "the curve never goes down")
 
+// MARK: Brightness key steps (lid closed)
+
+print("Brightness keys")
+func walk(from start: Int, up: Bool, steps: Int) -> [Int] {
+    var levels = [start]
+    while levels.count <= steps + 1 {
+        let next = BrightnessKeys.step(from: levels.last!, up: up, steps: steps)
+        if next == levels.last! { break }
+        levels.append(next)
+    }
+    return levels
+}
+let upFromZero = walk(from: 0, up: true, steps: 16)
+expect(upFromZero.count == 17 && upFromZero.last == 100, "16 presses go from 0% to 100%")
+expect(walk(from: 100, up: false, steps: 16).reversed() == upFromZero, "going down retraces the same 16 steps")
+expect(walk(from: 0, up: true, steps: 64).count == 65, "Option-Shift makes 64 steps")
+expect(BrightnessKeys.step(from: 90, up: true, steps: 16) == 94, "between steps, up goes to the next step (90% → 94%)")
+expect(BrightnessKeys.step(from: 90, up: false, steps: 16) == 88, "between steps, down goes to the previous step (90% → 88%)")
+expect(BrightnessKeys.step(from: 100, up: true, steps: 16) == 100 && BrightnessKeys.step(from: 0, up: false, steps: 16) == 0,
+       "stops at 0% and 100%")
+
 // MARK: Live sync with the running app
 
 if CommandLine.arguments.contains("--live") {
@@ -46,7 +67,7 @@ if CommandLine.arguments.contains("--live") {
     guard let display = BuiltInDisplay.id, let original = BuiltInDisplay.brightness(of: display),
         let setBrightness
     else { print("  Can't read the MacBook's brightness (is the lid closed?)"); exit(1) }
-    guard let monitor = TernMonitor.find() else { print("  Tern monitor not found."); exit(1) }
+    guard let monitor = ExternalMonitor.find() else { print("  No DDC monitor found."); exit(1) }
 
     let appCurve = BrightnessCurve.load(from: settings)
     func verify(_ label: String) {

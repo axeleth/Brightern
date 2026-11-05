@@ -13,7 +13,7 @@ final class MonitorLink {
     private var pending: (level: Int, force: Bool)?  // guarded by lock
     private var draining = false  // guarded by lock
 
-    private var monitor: TernMonitor?  // DDC queue only
+    private var monitor: ExternalMonitor?  // DDC queue only
     private var lastWritten: Int?  // DDC queue only
 
     /// Queues a level for the monitor. Unless `force` is set, it's skipped if the monitor is already there.
@@ -27,10 +27,10 @@ final class MonitorLink {
     }
 
     /// Finds the monitor again (after waking or being plugged in) and applies `level` if given.
-    /// Calls back on the main queue with whether it's connected and the level it reports.
-    func reconnect(applying level: Int?, completion: @escaping (_ connected: Bool, _ level: Int?) -> Void) {
+    /// Calls back on the main queue with the name of the monitor found (nil if none) and the level it reports.
+    func reconnect(applying level: Int?, completion: @escaping (_ monitorName: String?, _ level: Int?) -> Void) {
         queue.async {
-            self.monitor = TernMonitor.find()
+            self.monitor = ExternalMonitor.find()
             self.lastWritten = nil
             var reported: Int?
             if let monitor = self.monitor {
@@ -40,8 +40,8 @@ final class MonitorLink {
                 }
                 reported = monitor.brightness()
             }
-            let connected = self.monitor != nil
-            DispatchQueue.main.async { completion(connected, reported) }
+            let name = self.monitor?.name
+            DispatchQueue.main.async { completion(name, reported) }
         }
     }
 
@@ -63,7 +63,7 @@ final class MonitorLink {
 
     /// Returns false, and forgets the monitor so it's looked up again next time, if it didn't respond.
     private func write(_ level: Int) -> Bool {
-        if monitor == nil { monitor = TernMonitor.find() }
+        if monitor == nil { monitor = ExternalMonitor.find() }
         guard let monitor, monitor.setBrightness(level) else {
             self.monitor = nil
             lastWritten = nil

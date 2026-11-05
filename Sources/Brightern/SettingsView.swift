@@ -87,10 +87,10 @@ private struct GeneralPane: View {
             .monospacedDigit()
 
             Section {
-                Toggle("Match monitor to MacBook", isOn: Binding(get: { !engine.isPaused }, set: { engine.setPaused(!$0) }))
+                Toggle("Control monitor brightness", isOn: Binding(get: { !engine.isPaused }, set: { engine.setPaused(!$0) }))
                     .disabled(!engine.isSupported)
             } footer: {
-                Text("When this is off, the monitor keeps its current brightness and its own buttons work as usual.")
+                Text("With the lid open, the monitor follows the MacBook's brightness. With the lid closed, the brightness keys set the monitor instead. When this is off, the monitor keeps its current brightness and its own buttons work as usual.")
             }
 
             Section {
@@ -184,7 +184,7 @@ private struct AboutPane: View {
                         .frame(width: 96, height: 96)
                     Text("Brightern").font(.title2.bold())
                     Text("Version \(version)").foregroundStyle(.secondary)
-                    Text("Keeps an external monitor's brightness in step with the MacBook's.")
+                    Text("Keeps an external monitor's brightness in step with the MacBook's, or with the brightness keys when the lid is closed.")
                         .multilineTextAlignment(.center)
                         .padding(.top, 4)
                 }
@@ -193,7 +193,7 @@ private struct AboutPane: View {
             }
 
             Section {
-                LabeledContent("Monitor", value: "Tern Setups OLED")
+                LabeledContent("Monitor", value: engine.monitorName ?? "None found")
                 LabeledContent("Status", value: engine.monitorConnected ? "Connected" : "Not connected")
                 LabeledContent("Source code") {
                     Link("github.com/axeleth/Brightern", destination: URL(string: "https://github.com/axeleth/Brightern")!)
